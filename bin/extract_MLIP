@@ -1,0 +1,22 @@
+#!/bin/csh
+set poscar = "CONTCAR"
+set str = "str_relax.out"
+sed -n '3,5p' $poscar > $str
+echo "1 0 0" >> $str
+echo "0 1 0" >> $str
+echo "0 0 1" >> $str
+sed -n '9,$p' $poscar >> $str
+set force = "force_temp.out"
+set force_out = "force.out"
+sed 's/\[//g; s/\]//g' $force > $force_out
+set stress = "stress_temp.out"
+set stress_out = "stress.out"
+set line = `cat $stress`
+set clean_line = `echo $line | sed 's/\[//g; s/\]//g'`
+set numbers = ( $clean_line )
+echo "$numbers[1] $numbers[4] $numbers[6]" > $stress_out
+echo "$numbers[4] $numbers[2] $numbers[5]" >> $stress_out
+echo "$numbers[6] $numbers[5] $numbers[3]" >> $stress_out
+rm force_temp.out
+rm stress_temp.out
+rm "wait"

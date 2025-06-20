@@ -1,0 +1,8 @@
+[submodule "third_party/lammps"]
+	path = third_party/lammps
+	url = https://github.com/dogusariturk/lammps.git
+	branch = new-models
+[submodule "third_party/MaterialsFramework"]
+	path = third_party/MaterialsFramework
+	url = https://github.com/dogusariturk/MaterialsFramework.git
+	branch = main

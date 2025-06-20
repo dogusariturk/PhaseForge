@@ -1,0 +1,60 @@
+#!/bin/csh
+
+# Initialize variables
+set mlip_name = ""
+set model_name = ""
+set final_temperature = ""
+set norun = 0  # Flag for skipping Python execution
+
+# Parse command-line arguments
+foreach arg ($argv)
+    if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
+        set mlip_name = `expr "$arg" : '-mlip=\(.*\)'`
+    else if (`echo "$arg" | grep -q "^-model="; echo $?` == 0) then
+        set model_name = `expr "$arg" : '-model=\(.*\)'`
+    else if (`echo "$arg" | grep -q "^-temp="; echo $?` == 0) then
+        set final_temperature = `expr "$arg" : '-temp=\(.*\)'`
+    else if ("$arg" == "-nr") then
+        set norun = 1
+    endif
+end
+
+# Check required arguments
+if ("$mlip_name" == "" || "$model_name" == "" || "$final_temperature" == "") then
+    echo "Usage: MLIPmd -mlip=[MLIP] -model=[model] -temp=[temperature] [-nr]"
+    exit 1
+endif
+
+# Generate the Python MD script
+cat > MLIPmd.py << EOF
+import numpy as np
+from pymatgen.core import Structure
+
+from materialsframework.calculators import ${mlip_name}Calculator
+
+
+structure = Structure.from_file("POSCAR")
+
+calculator = ${mlip_name}Calculator(
+    model="${model_name}",
+    ensemble="nvt_nose_hoover",
+    timestep=1.0,
+    temperature=${final_temperature},
+    logfile='-',
+)
+
+res = calculator.run(structure=structure, steps=2000)
+
+res["final_structure"].to("CONTCAR", fmt="poscar")
+np.savetxt('total_energy_nvt.txt', res["total_energy"])
+np.savetxt('energy', np.mean(res["total_energy"]))
+
+EOF
+
+# Conditionally run the Python script
+if ($norun == 0) then
+    echo "Running MD simulation with ${mlip_name}Calculator, model '${model_name}', temperature ${final_temperature} K..."
+    python MLIPmd.py
+else
+    echo "Python execution skipped due to -nr flag."
+endif

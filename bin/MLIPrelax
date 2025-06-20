@@ -1,0 +1,45 @@
+#!/bin/csh
+
+# Initialize variables
+set MLIP = ""
+set model = ""
+
+# Parse command-line arguments
+foreach arg ($argv)
+    if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
+        set MLIP = `expr "$arg" : '-mlip=\(.*\)'`
+    else if (`echo "$arg" | grep -q "^-model="; echo $?` == 0) then
+        set model = `expr "$arg" : '-model=\(.*\)'`
+    endif
+end
+
+# Check if required arguments are provided
+if ("$MLIP" == "" || "$model" == "") then
+    echo "Usage: MLIPrelax -mlip=[MLIP] -model=[model]"
+    exit 1
+endif
+
+# Generate Python script with user-specified MLIP and model
+cat > MLIPrelax.py << EOF
+import numpy as np
+from pymatgen.core import Structure
+
+from materialsframework.calculators import ${MLIP}Calculator
+
+
+struct = Structure.from_file("POSCAR")
+
+calculator = ${MLIP}Calculator(model='${model}', fmax=0.001, verbose=True)
+calculate_results = calculator.relax(struct)
+
+calculate_results["final_structure"].to("CONTCAR", fmt="poscar")
+np.savetxt('energy', [calculate_results["energy"]])
+np.savetxt('stress_temp.out', calculate_results["stress"])
+np.savetxt('force.out', calculate_results["forces"])
+
+EOF
+
+echo "Running relaxation with ${MLIP}Calculator and model '${model}'..."
+
+# Execute the generated Python script
+python MLIPrelax.py
