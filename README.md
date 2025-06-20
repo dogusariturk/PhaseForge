@@ -2,6 +2,10 @@
 
 # PhaseForge
 
+<p align="center">
+  <img src="docs/logo.png" alt="PhaseForge Logo" width="200"/>
+</p>
+
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
 
 <p>
