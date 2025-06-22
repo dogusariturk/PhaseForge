@@ -7,6 +7,7 @@
 </p>
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
+![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)
 
 <p>
 PhaseForge is a versatile tool designed to assist in the creation and management of thermodynamic database (TDB) files, particularly for materials science applications. It provides a user-friendly interface for generating TDB files, making it an essential resource for researchers and engineers in the field.
@@ -24,9 +25,11 @@ PhaseForge is a versatile tool designed to assist in the creation and management
 
 ## Features
 
-- 
-- 
-- 
+- Integrates MLIPs (e.g., GRACE, ORB, CHGNet, SevenNet) into CALPHAD workflows
+- Interfaces seamlessly with ATAT and MaterialsFramework
+- Supports automated structure relaxation, phonon and MD-based free energy calculations
+- Capable of fitting TDB files for use in CALPHAD-based software (e.g., Pandat, Thermo-Calc)
+- Benchmarking framework for evaluating MLIP accuracy in predicting phase stability
 
 ---
 
@@ -34,11 +37,14 @@ PhaseForge is a versatile tool designed to assist in the creation and management
 
 ### Prerequisites
 
-- CMake >= 3.10
+- CMake ≥ 3.10
 - C++14 compatible compiler (e.g., GCC, Clang)
 - Git
+- Python 3 with dependencies (see [MaterialsFramework](https://github.com/dogusariturk/MaterialsFramework))
+- [Alloy Theoretic Automated Toolkit (ATAT)](https://axelvandewalle.github.io/www-avdw/atat/)
+- (Optional) [LAMMPS with MLIP integration](https://github.com/dogusariturk/lammps/tree/new-models)
 
-### Build and Install
+### Build Instructions
 
 ```sh
 git clone https://github.com/dogusariturk/PhaseForge.git
@@ -51,10 +57,45 @@ make install
 
 ---
 
-## Usage
+## Quick Start
 
+Use the `sqscal` command to generate a phase diagram with minimal setup:
+
+```sh
+sqscal -e Ni,Re -l FCC_A1,HCP_A3 -lv 2 -mlip Grace -model GRACE-2L-OMAT
+```
+
+This command performs:
+
+* Structure sampling using SQS
+* MLIP-based energy calculations
+* Optional MD and vibrational contributions
+* CALPHAD model fitting (TDB output)
 
 ---
+
+## Citation
+
+If you use PhaseForge in your research, please cite the following:
+
+> Siya Zhu, Doğuhan Sarıtürk, Raymundo Arróyave. *Machine Learning Potentials for Alloys: A Detailed Workflow to Predict Phase Diagrams and Benchmark Accuracy*, arXiv:2506.16771 [cond-mat.mtrl-sci], Jun. 2025.
+
+BibTeX:
+
+```bibtex
+@misc{zhu2025machinelearningpotentialsalloys,
+      title={Machine Learning Potentials for Alloys: A Detailed Workflow to Predict Phase Diagrams and Benchmark Accuracy}, 
+      author={Siya Zhu and Doğuhan Sarıtürk and Raymundo Arroyave},
+      year={2025},
+      eprint={2506.16771},
+      archivePrefix={arXiv},
+      primaryClass={cond-mat.mtrl-sci},
+      url={https://arxiv.org/abs/2506.16771}, 
+}
+```
+
+---
+
 ## License
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE).
+This project is licensed under the GNU GPLv3 License. See the [LICENSE](./LICENSE) file for details.
