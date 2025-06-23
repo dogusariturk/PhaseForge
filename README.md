@@ -129,10 +129,18 @@ MLIP MD with NVT ensemble for 2000 steps. Average energy → energy. If -nr, onl
 `MLIPliquid`
 
 ```sh
-MLIPliquid -mlip=[MLIP] -model=[model] -dt=[temperature_offset] [-nr]
+MLIPliquid -mlip=[MLIP] -model=[model] -dt=[temperature_offset] [-nr] [-lammps]
 ```
 
-Calculate the average of melting temperature in atomlabel.tmp and add “dt”. Performing MLIPmd with that temperature. If -nr, only generate the MLIPmd.py but not run.
+Calculate the average of melting temperature in atomlabel.tmp and add “dt”. Performing MLIPmd with that temperature. If -nr, only generate the MLIPmd.py but not run. If -lammps, runs with MLIPlammps.
+
+`MLIPlammps`
+
+```sh
+MLIPlammps -mlip=[MLIP] -model=[model] -temp=[temperature] [-nr]
+```
+
+Perform MD calculations with LAMMPS and MLIP. If -nr, only generate the lammps.in but not run.
 
 `ternary_search`
 
