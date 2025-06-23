@@ -74,6 +74,85 @@ This command performs:
 
 ---
 
+
+## Commands
+
+`sqscal`
+
+```sh
+ sqscal -e [Element1, Element2, ...] -l [Lattice1,Lattice2] -lv [Level] -mlip [MLIP] -model [MLIP model version] [-vib] [-sro]
+```
+
+A simple in line command for a quick start.
+
+
+`MLIPrelax`
+
+```sh
+MLIPrelax -mlip=[MLIP] -model=[model]
+```
+
+Relax the structure with MLIP-model & single point calculation. fmax=0.001, step=1000
+
+
+`MLIPcalc`
+
+```sh
+MLIPcalc -mlip=[MLIP] -model=[model]
+```
+
+Single point calculation using MLIP
+
+`extract_MLIP`
+
+```sh
+extract_MLIP
+```
+Extract the MLIP calculation results by MLIP to the ATAT form. CONTCAR, force_temp.out → force, stress_temp.out → stress
+
+`runstruct_MLIP`
+
+```sh
+runstruct_MLIP -mlip=[MLIP] -model=[model] [-static]
+```
+
+runstruct_vasp -nr, MLIPrelax, then extract_MLIP. If -static, runs MLIPcalc instead of MLIPrelax.
+
+`MLIPmd`
+
+```sh
+MLIPmd -mlip=[MLIP] -model=[model] -temp=[temperature] [-nr]
+```
+
+MLIP MD with NVT ensemble for 2000 steps. Average energy → energy. If -nr, only generate the MLIPmd.py but not run.
+
+`MLIPliquid`
+
+```sh
+MLIPliquid -mlip=[MLIP] -model=[model] -dt=[temperature_offset] [-nr]
+```
+
+Calculate the average of melting temperature in atomlabel.tmp and add “dt”. Performing MLIPmd with that temperature. If -nr, only generate the MLIPmd.py but not run.
+
+`ternary_search`
+
+```sh
+ternary_search -ll=[lower limit] -ul=[upper limit] -eps=[epsilon] -c=[command for energy]
+```
+
+Perform ternary search for the volume. Stop when upper limit - lower limit < epsilon. 
+
+`robustrelax_MLIP`
+
+```sh
+ robustrelax_MLIP -mlip=[MLIP] -model=[model] [other options]
+```
+
+Perform robustrelax_vasp (command in ATAT) with MLIP and the options
+
+---
+
+
 ## Citation
 
 If you use PhaseForge in your research, please cite the following:
