@@ -6,6 +6,7 @@
   <img src="logo.png" alt="PhaseForge Logo" width="200"/>
 </p>
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15730911.svg)](https://doi.org/10.5281/zenodo.15730911)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
 ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)
 
@@ -167,17 +168,29 @@ If you use PhaseForge in your research, please cite the following:
 
 > Siya Zhu, Doğuhan Sarıtürk, Raymundo Arróyave. *Machine Learning Potentials for Alloys: A Detailed Workflow to Predict Phase Diagrams and Benchmark Accuracy*, arXiv:2506.16771 [cond-mat.mtrl-sci], Jun. 2025.
 
+> Sarıtürk, D., Zhu, S., & Arroyave, R. (2025). PhaseForge (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.15730912
+
 BibTeX:
 
 ```bibtex
-@misc{zhu2025machinelearningpotentialsalloys,
-      title={Machine Learning Potentials for Alloys: A Detailed Workflow to Predict Phase Diagrams and Benchmark Accuracy}, 
-      author={Siya Zhu and Doğuhan Sarıtürk and Raymundo Arroyave},
-      year={2025},
-      eprint={2506.16771},
-      archivePrefix={arXiv},
-      primaryClass={cond-mat.mtrl-sci},
-      url={https://arxiv.org/abs/2506.16771}, 
+@article{zhu2025machinelearningpotentialsalloys,
+  author       = {Zhu, Siya and Sarıtürk, Doğuhan and Arroyave, Raymundo},
+  title        = {Machine Learning Potentials for Alloys: A Detailed Workflow to Predict Phase Diagrams and Benchmark Accuracy},
+  year         = 2025,
+  archivePrefix= {arXiv},
+  eprint       = {2506.16771},
+  primaryClass = {cond-mat.mtrl-sci},
+  url          = {https://arxiv.org/abs/2506.16771},
+}
+
+@software{sariturk_2025_15730912,
+  author       = {Sarıtürk, Doğuhan and Zhu, Siya and Arroyave, Raymundo},
+  title        = {PhaseForge},
+  month        = jun,
+  year         = 2025,
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.15730911},
+  url          = {https://doi.org/10.5281/zenodo.15730911},
 }
 ```
 
