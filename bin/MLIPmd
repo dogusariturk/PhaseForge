@@ -47,7 +47,7 @@ res = calculator.run(structure=structure, steps=2000)
 
 res["final_structure"].to("CONTCAR", fmt="poscar")
 np.savetxt('total_energy_nvt.txt', res["total_energy"])
-np.savetxt('energy', np.mean(res["total_energy"]))
+np.savetxt('energy', [np.mean(res["total_energy"])], fmt="%.8f")
 
 EOF
 
