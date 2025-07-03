@@ -7,6 +7,7 @@
 </p>
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15730911.svg)](https://doi.org/10.5281/zenodo.15730911)
+[![arXiv](https://img.shields.io/badge/arXiv-2506.16771-blue?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2506.16771)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
 ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)
 
