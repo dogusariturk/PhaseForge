@@ -32,6 +32,10 @@ EOF
       set level="$2"
       shift
     breaksw
+    case "-checkrelax":	
+      set checkrelaxcutoff="$2"
+      shift
+    breaksw
     case "-sro":
       set sro
     breaksw
@@ -99,8 +103,12 @@ foreach phase ($lattice)
 	    sqs2tdb -fit
         else
 	    #foreachfile str.out pwd \; cellcvrt -ja=0.01 -jc=0.005 < str.out >str_hint.out
-	    foreachfile str.out pwd \; runstruct_MLIP -mlip=$mlip -model=$model
-	    if ( $?vib) then
+	    if (! $?checkrelaxcutoff) then
+                foreachfile str.out pwd \; runstruct_MLIP -mlip=$mlip -model=$model
+	    else
+                foreachfile str.out pwd \; runstruct_MLIP -mlip=$mlip -model=$model -checkrelax=$checkrelaxcutoff
+            endif   
+            if ( $?vib) then
 		foreachfile endmem pwd \; fitfc -si=str_relax.out -ernn=4 -ns=1 -nrr
 		foreachfile -d 3 wait \; runstruct_MLIP -mlip=$mlip -model=$model -static
 		foreachfile endmem pwd \; fitfc -si=str_relax.out -f -frnn=2 -fn
