@@ -35,7 +35,7 @@ calculate_results = calculator.relax(struct)
 calculate_results["final_structure"].to("CONTCAR", fmt="poscar")
 np.savetxt('energy', [calculate_results["energy"]], fmt="%.8f")
 np.savetxt('stress_temp.out', calculate_results["stress"])
-np.savetxt('force.out', calculate_results["forces"])
+np.savetxt('force_temp.out', calculate_results["forces"])
 
 EOF
 

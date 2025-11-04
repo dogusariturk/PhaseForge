@@ -8,15 +8,15 @@ while ( $#argv != 0 )
     case "-h":
       cat - <<EOF
       sqscal, by Siya Zhu and Doguhan Sariturk
-      Usage: sqscal -e [Element1, Element2, ...] -l [Lattice1,Lattice2] -lv [Level] -mlip [MLIP] -model [MLIPmodel version] [-vib] [-sro]       
+      Usage: sqscal -e [Element1, Element2, ...] -l [Lattice1,Lattice2] -lv [Level] -mlip [MLIP] -model [MLIPmodel version] [-vib] [-sro]
       where [Element1,Element2,. . . ] is the list of elements symbols in the system (the element should be included in the MLIP),
-      the [Lattice1, Lattice2] are the standard CALPHAD crystal structure names (e.g. FCC A1, BCC A2), 
-      [Level] is the fineness of composition grid, 
+      the [Lattice1, Lattice2] are the standard CALPHAD crystal structure names (e.g. FCC A1, BCC A2),
+      [Level] is the fineness of composition grid,
       [MLIP] is the type of machine-learning interatomic potential used in the calculation,
       [-vib] option indicates the vibrational contribution is calculated (for endmembers),
       [-sro] option indicates the short-range order correction is applied.
       No ab-initio data is applied, no inflection detection for mechanically unstable structures.
-      Ternary search with temperature offset of 50K is automatically applied for the liquid phase. 
+      Ternary search with temperature offset of 50K is automatically applied for the liquid phase.
 EOF
       exit 1
       breaksw
@@ -32,7 +32,7 @@ EOF
       set level="$2"
       shift
     breaksw
-    case "-checkrelax":	
+    case "-checkrelax":
       set checkrelaxcutoff="$2"
       shift
     breaksw
@@ -80,24 +80,24 @@ echo "Using  MLIP: $mlip, model: $model"
 
 foreach phase ($lattice)
 	echo "Calculating $phase phase"
-	
+
 	sqs2tdb -cp -sp="$elements" -l="$phase" -lv="$level"
-	sqs2tdb -cp -sp="$elements" -l="$phase" -lv="$level"	
+	sqs2tdb -cp -sp="$elements" -l="$phase" -lv="$level"
 
 	cd "$phase"
-	
+
 #extract the input file and run with MatGL
 
         if ("$phase" == "LIQUID") then
 	    set md_command = "MLIPliquid -mlip=$mlip -model=$model -dt=50"
-	    foreachfile str.out pwd \; runstruct_vasp -nr				      #get POSCAR 
-# 	    foreachfile str.out pwd \; ternary_search -ll=0.7 -ul=1.3 -eps=0.02 -c="$md_command" 
+	    foreachfile str.out pwd \; runstruct_vasp -nr				      #get POSCAR
+# 	    foreachfile str.out pwd \; ternary_search -ll=0.7 -ul=1.3 -eps=0.02 -c="$md_command"
 	    foreach file (`find . -name str.out`)
     		set dir = `dirname $file`
     		cd $dir
                 ternary_search -ll=0.7 -ul=1.3 -eps=0.02 -c="$md_command"
     		cd -
-	    end	
+	    end
 
 	    (echo 1,0; echo 2,0) >> terms.in                                                  #default Liquid fitting order
 	    sqs2tdb -fit
@@ -107,13 +107,13 @@ foreach phase ($lattice)
                 foreachfile str.out pwd \; runstruct_MLIP -mlip=$mlip -model=$model
 	    else
                 foreachfile str.out pwd \; runstruct_MLIP -mlip=$mlip -model=$model -checkrelax=$checkrelaxcutoff
-            endif   
+            endif
             if ( $?vib) then
 		foreachfile endmem pwd \; fitfc -si=str_relax.out -ernn=4 -ns=1 -nrr
 		foreachfile -d 3 wait \; runstruct_MLIP -mlip=$mlip -model=$model -static
 		foreachfile endmem pwd \; fitfc -si=str_relax.out -f -frnn=2 -fn
 		foreachfile endmem pwd \; robustrelax_vasp -vib
-	    endif		
+	    endif
 	    if ("$phase" == "BCC_A2" || "$phase" == "FCC_A1" || "$phase" == "HCP_A3") then
 		(echo 1,0; echo 2,0) >> terms.in
 	    else
@@ -124,8 +124,8 @@ foreach phase ($lattice)
 	    else
 		sqs2tdb -fit
 	    endif
-        endif  
+        endif
 	cd ..
-   
+
 end
 sqs2tdb -tdb -oc

@@ -8,7 +8,6 @@
 //Command for energy, example: "MLIPcalc -mlip=[MLIP] -model=[model]" or "MLIPmd -mlip=[MLIP]= -model=[model]"
 std::string command;
 
-
 // Function to call Python script and get energy
 double md(double x) {
     std::ifstream fin("POSCAR");
@@ -86,8 +85,6 @@ double ternary_search(double left, double right, double eps) {
 }
 
 int main(int argc, char* argv[]){
-
-    
     double lower_limit = 0.7;
     double upper_limit = 1.3;
     double epsilon = 1e-2;
@@ -114,10 +111,8 @@ int main(int argc, char* argv[]){
     std::cout << "Lower limit: " << lower_limit << std::endl;
     std::cout << "Upper limit: " << upper_limit << std::endl;
     std::cout << "Epsilon    : " << epsilon << std::endl;
-    std::cout << "Command    : " << command << std::endl;	
-	
-	
-	
+    std::cout << "Command    : " << command << std::endl;
+
     double min_x = ternary_search(lower_limit, upper_limit,epsilon);
     double min_energy = md(min_x);
 

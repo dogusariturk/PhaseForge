@@ -28,16 +28,18 @@ endif
 
 #get POSCAR with ATAT
 runstruct_vasp -nr
+
 # Decide which script to run
 if ($is_static == 1) then
     MLIPcalc -mlip=$mlip_name -model=$model_name
 else
     MLIPrelax -mlip=$mlip_name -model=$model_name
 endif
+
 #convert results to ATAT format
 extract_MLIP
 if (?$checkrelaxcutoff) then
- env checkrelax -1 > relaxation 
+ env checkrelax -1 > relaxation
  set relax_val = `cat relaxation`
   if (`echo "$checkrelaxcutoff $relax_val" | awk '{if ($1 < $2) print 1; else print 0}'` == 1) then
         mv energy energy_d

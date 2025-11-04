@@ -12,6 +12,7 @@ foreach arg ($argv)
         set model = `expr "$arg" : '-model=\(.*\)'`
     endif
 end
+
 # Check for required arguments
 if ("$MLIP" == "" || "$model" == "") then
     echo "Usage: MLIPcalc -mlip=[MLIP] -model=[model]"
@@ -32,9 +33,9 @@ calculator = ${MLIP}Calculator(model="${model}", fmax=0.001, verbose=True)
 calculate_results = calculator.calculate(struct)
 
 calculate_results["final_structure"].to("CONTCAR", fmt="poscar")
-np.savetxt('energy', [calculate_results["energy"]], fmt="%.8f"))
+np.savetxt('energy', [calculate_results["energy"]], fmt="%.8f")
 np.savetxt('stress_temp.out', calculate_results["stress"])
-np.savetxt('force.out', calculate_results["forces"])
+np.savetxt('force_temp.out', calculate_results["forces"])
 
 EOF
 

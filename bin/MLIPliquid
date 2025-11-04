@@ -12,6 +12,7 @@ set temperature_offset = ""
 set model_name = ""
 set norun = 0  # Flag for skipping Python execution
 set lammps = 0  # Flag for LAMMPS execution
+
 # Loop through each argument and capture the value
 foreach arg ($argv)
     if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
@@ -66,10 +67,10 @@ end
 # Calculate the average melting point if count > 0
 if ( $count > 0 ) then
     set average = `echo "$sum / $count" | bc -l`
-    
+
     # Add the temperature offset from -T [temperature]
     set final_temperature = `echo "$average + $temperature_offset" | bc -l`
-    
+
     # Output the result to the file 'temperature'
     echo $final_temperature > temperature
     echo "Final temperature: $final_temperature"
@@ -85,5 +86,3 @@ else if ($norun == 0) then
 else
     MLIPmd -mlip=$mlip_name -model=$model_name -temp=$final_temperature -nr
 endif
-
-
