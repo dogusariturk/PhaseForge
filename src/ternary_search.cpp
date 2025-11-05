@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 
-//Command for energy, example: "MLIPcalc -mlip=[MLIP] -model=[model]" or "MLIPmd -mlip=[MLIP]= -model=[model]"
+// Command for energy, example: "MLIPcalc -mlip=[MLIP] -model=[model]" or "MLIPmd -mlip=[MLIP]= -model=[model]"
 std::string command;
 
 // Function to call Python script and get energy
@@ -50,7 +50,7 @@ double md(double x) {
 
     std::ifstream fin2("energy");
     if (!fin2) {
-        std::cerr << "Error reading  energy\n";
+        std::cerr << "Error reading energy\n";
         exit(1);
     }
 
@@ -74,17 +74,17 @@ double ternary_search(double left, double right, double eps) {
         else
             left = m1;
 
-    	std::cout << "Iter " << iter
+        std::cout << "Iter " << iter
                   << ": left = " << left
                   << ", m1 = " << m1 << ", energy(m1) = " << f1
                   << ", m2 = " << m2 << ", energy(m2) = " << f2
                   << ", right = " << right << std::endl;
-	iter++;
+        ++iter;
     }
     return (left + right) / 2.0;
 }
 
-int main(int argc, char* argv[]){
+int main(int argc, char* argv[]) {
     double lower_limit = 0.7;
     double upper_limit = 1.3;
     double epsilon = 1e-2;
@@ -113,7 +113,7 @@ int main(int argc, char* argv[]){
     std::cout << "Epsilon    : " << epsilon << std::endl;
     std::cout << "Command    : " << command << std::endl;
 
-    double min_x = ternary_search(lower_limit, upper_limit,epsilon);
+    double min_x = ternary_search(lower_limit, upper_limit, epsilon);
     double min_energy = md(min_x);
 
     std::cout << "Minimum found at x = " << min_x << std::endl;
