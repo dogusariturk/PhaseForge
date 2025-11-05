@@ -1,17 +1,17 @@
-#!/bin/csh
+#!/bin/csh -f
 
-# Initialize variables
 set mlip_name = ""
 set model_name = ""
 set is_static = 0
+set checkrelaxcutoff = ""
 
-# Parse command-line arguments
 foreach arg ($argv)
     if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
         set mlip_name = `expr "$arg" : '-mlip=\(.*\)'`
-        echo "MLIP=$mlip_name"
+        echo "MLIP Name=$mlip_name"
     else if (`echo "$arg" | grep -q "^-model="; echo $?` == 0) then
         set model_name = `expr "$arg" : '-model=\(.*\)'`
+        echo "Model=$model_name"
     else if ("$arg" == "-static") then
         set is_static = 1
     else if (`echo "$arg" | grep -q "^-checkrelax="; echo $?` == 0) then
@@ -20,28 +20,25 @@ foreach arg ($argv)
     endif
 end
 
-# Check required arguments
 if ("$mlip_name" == "" || "$model_name" == "") then
-    echo "Usage: runstruct_MLIP -mlip=[MLIP] -model=[model] [-static]"
+    echo "Usage: runstruct_MLIP -mlip=[MLIP] -model=[model] [-static] [-checkrelax=value]"
     exit 1
 endif
 
-#get POSCAR with ATAT
 runstruct_vasp -nr
 
-# Decide which script to run
 if ($is_static == 1) then
     MLIPcalc -mlip=$mlip_name -model=$model_name
 else
     MLIPrelax -mlip=$mlip_name -model=$model_name
 endif
 
-#convert results to ATAT format
 extract_MLIP
-if (?$checkrelaxcutoff) then
- env checkrelax -1 > relaxation
- set relax_val = `cat relaxation`
-  if (`echo "$checkrelaxcutoff $relax_val" | awk '{if ($1 < $2) print 1; else print 0}'` == 1) then
+
+if ( $?checkrelaxcutoff && "$checkrelaxcutoff" != "" ) then
+    env checkrelax -1 > relaxation
+    set relax_val = `cat relaxation`
+    if (`echo "$checkrelaxcutoff $relax_val" | awk '{if ($1 < $2) print 1; else print 0}'` == 1) then
         mv energy energy_d
-   endif
+    endif
 endif

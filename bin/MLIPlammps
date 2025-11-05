@@ -1,12 +1,10 @@
-#!/bin/csh
+#!/bin/csh -f
 
-# Initialize variables
 set mlip_name = ""
 set model_name = ""
 set final_temperature = ""
-set norun = 0  # Flag for skipping Python execution
+set norun = 0
 
-# Parse command-line arguments
 foreach arg ($argv)
     if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
         set mlip_name = `expr "$arg" : '-mlip=\(.*\)'`
@@ -19,24 +17,24 @@ foreach arg ($argv)
     endif
 end
 
-# Check required arguments
 if ("$mlip_name" == "" || "$model_name" == "" || "$final_temperature" == "") then
     echo "Usage: MLIPlammps -mlip=[MLIP] -model=[model] -temp=[temperature] [-nr]"
     exit 1
 endif
 
-# Create a 2x2x2 supercell from the POSCAR file and convert it to LAMMPS data format
 python - <<EOF
 import numpy as np
 from pymatgen.core import Structure
 from pymatgen.io.lammps.data import LammpsData
+
 structure = Structure.from_file('POSCAR')
 supercell = structure * [2, 2, 2]
+
 lammps_data = LammpsData.from_structure(supercell, atom_style='atomic')
 lammps_data.write_file('POSCAR.data')
+
 EOF
 
-# Generate the Python MD script
 cat > lammps.in << EOF
 variable        s equal step
 variable        t equal temp
@@ -68,14 +66,14 @@ reset_timestep  0
 velocity        all create ${final_temperature} 93723 mom yes rot no
 
 # Equilibration: NPT
-fix             1 all npt temp ${final_temperature} ${final_temperature} $(10.0*dt) iso 0.0 0.0 $(100.0*dt)
+fix             1 all npt temp ${final_temperature} ${final_temperature} \$(10.0*dt) iso 0.0 0.0 \$(100.0*dt)
 thermo          100
 thermo_style    custom step temp press pe ke etotal lx ly lz
 run             30000  # 30 ps
 unfix           1
 
 # Production: NVT
-fix             2 all nvt temp ${final_temperature} ${final_temperature} $(100.0*dt)
+fix             2 all nvt temp ${final_temperature} ${final_temperature} \$(100.0*dt)
 fix             Eavg all ave/time 10 3000 30000 etotal file energy ave one
 fix_modify      Eavg title1 "" title2 "" title3 ""
 thermo          100
@@ -83,10 +81,8 @@ thermo_style    custom step temp press pe ke etotal lx ly lz
 run             30000  # 30 ps
 unfix           2
 unfix           Eavg
-
 EOF
 
-# Conditionally run the LAMMPS script
 if ($norun == 0) then
     lmp -in lammps.in
 else

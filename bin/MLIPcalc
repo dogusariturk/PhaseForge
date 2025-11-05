@@ -1,10 +1,8 @@
-#!/bin/csh
+#!/bin/csh -f
 
-# Initialize variables
 set MLIP = ""
 set model = ""
 
-# Parse command-line arguments
 foreach arg ($argv)
     if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
         set MLIP = `expr "$arg" : '-mlip=\(.*\)'`
@@ -13,19 +11,16 @@ foreach arg ($argv)
     endif
 end
 
-# Check for required arguments
 if ("$MLIP" == "" || "$model" == "") then
     echo "Usage: MLIPcalc -mlip=[MLIP] -model=[model]"
     exit 1
 endif
 
-# Generate Python script with user-specified MLIP and model
 cat > MLIPcalc.py << EOF
 import numpy as np
 from pymatgen.core import Structure
 
 from materialsframework.calculators import ${MLIP}Calculator
-
 
 struct = Structure.from_file("POSCAR")
 
@@ -36,10 +31,8 @@ calculate_results["final_structure"].to("CONTCAR", fmt="poscar")
 np.savetxt('energy', [calculate_results["energy"]], fmt="%.8f")
 np.savetxt('stress_temp.out', calculate_results["stress"])
 np.savetxt('force_temp.out', calculate_results["forces"])
-
 EOF
 
 echo "Running calculation with ${MLIP}Calculator and model '${model}'..."
 
-# Execute the generated Python script
 python MLIPcalc.py
