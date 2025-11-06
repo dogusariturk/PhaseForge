@@ -1,4 +1,4 @@
-#!/bin/csh
+#!/bin/csh -f
 
 set wrapfilename="vasp.wrap"
 set maxdepth=5

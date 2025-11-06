@@ -1,4 +1,4 @@
-#!/bin/csh
+#!/bin/csh -f
 
 # Initialize variables
 set mlip_name = ""

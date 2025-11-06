@@ -1,4 +1,4 @@
-#!/bin/csh
+#!/bin/csh -f
 set poscar = "CONTCAR"
 set str = "str_relax.out"
 

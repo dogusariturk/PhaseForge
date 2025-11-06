@@ -1,4 +1,4 @@
-#!/bin/csh
+#!/bin/csh -f
 
 # Check if the correct number of arguments are provided
 if ($#argv < 3 ) then
