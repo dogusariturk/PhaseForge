@@ -1,19 +1,16 @@
 #!/bin/csh -f
 
-# Check if the correct number of arguments are provided
-if ($#argv < 3 ) then
+if ($#argv < 3) then
     echo "Usage: $0 -mlip=[Name of MLIP] -model=[Name of Model_version] -dt=[temperature] [-nr] [-LAMMPS]"
     exit 1
 endif
 
-# Initialize variables for MLIP name and temperature offset
 set mlip_name = ""
 set temperature_offset = ""
 set model_name = ""
-set norun = 0  # Flag for skipping Python execution
-set lammps = 0  # Flag for LAMMPS execution
+set norun = 0
+set lammps = 0
 
-# Loop through each argument and capture the value
 foreach arg ($argv)
     if (`echo "$arg" | grep -q "^-mlip="; echo $?` == 0) then
         set mlip_name = `expr "$arg" : '-mlip=\(.*\)'`
@@ -28,50 +25,35 @@ foreach arg ($argv)
     endif
 end
 
-# Check if all arguments were properly provided
-if ("$mlip_name" == "" || "$temperature_offset" == "" || "$model_name" == "" ) then
-    echo "-mlip=[Name of MLIP], -model=[Name of Model_version]  and -dt=[temperature] arguments are required."
+if ("$mlip_name" == "" || "$temperature_offset" == "" || "$model_name" == "") then
+    echo "-mlip=[Name of MLIP], -model=[Name of Model_version] and -dt=[temperature] arguments are required."
     exit 1
 endif
 
-# Output the parsed arguments (optional for verification)
 echo "MLIP Name: $mlip_name"
 echo "Model: $model_name"
 echo "Temperature Offset: $temperature_offset"
 
-# Define the element symbols array
 set elements = (H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb I Te Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf)
 
-# Define the corresponding melting points array in Kelvin (for simplicity, placeholders are used for some elements)
 set melting_points = (14.01 0.0 453.65 1560 2349 3800 63.15 54.36 53.53 24.56 370.87 923.0 933.47 1687 317.3 388.36 171.6 83.8 336.53 1115 1814 1941 2183 2180 1519 1811 1768 1728 1357.77 692.88 302.91 1211.4 1090 453 265.8 115.79 312.46 1050 1799 2128 2750 2896 2430 2607 2237 1828.05 1234.93 594.22 429.75 505.08 903.78 722.66 386.85 161.4 301.59 1000 1193 1068 1208 1297 1315 1345 1099 1585 1629 1680 1734 1802 1818 1097 1925 2506 3290 3695 3459 3306 2719 2041.4 1337.33 234.43 577 600.61 544.7 527 575 202 300 973 1323 2115 1841 1405.3 917 912.5 1449 1613 1259 1173 1133 1125 1100 1100 1900 2400)
 
-# Read the elements from the file
 set sum = 0
 set count = 0
-set filename = "atomlabel.tmp"  # Name of the input file
+set filename = "atomlabel.tmp"
 
-# Loop through each element in the input file
 foreach element (`cat $filename`)
-    # Find the index of the element in the 'elements' array
-   set idx = `echo "$elements" | tr ' ' '\n' | grep -n -w "$element" | cut -d: -f1`
-    # If the element is found, add its melting point to the sum
+    set idx = `echo "$elements" | tr ' ' '\n' | grep -n -w "$element" | cut -d: -f1`
     if ( $?idx ) then
         set melting_point = $melting_points[$idx]
-        # Convert the melting point to a number to ensure it's treated as a valid numeric value
-        # Sum the valid melting points and increment count
-	set sum = `echo "$sum + $melting_point" | bc`
-	@ count = $count + 1
-	endif
+        set sum = `echo "$sum + $melting_point" | bc`
+        @ count = $count + 1
+    endif
 end
 
-# Calculate the average melting point if count > 0
-if ( $count > 0 ) then
+if ($count > 0) then
     set average = `echo "$sum / $count" | bc -l`
-
-    # Add the temperature offset from -T [temperature]
     set final_temperature = `echo "$average + $temperature_offset" | bc -l`
-
-    # Output the result to the file 'temperature'
     echo $final_temperature > temperature
     echo "Final temperature: $final_temperature"
 else
