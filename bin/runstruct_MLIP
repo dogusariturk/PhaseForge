@@ -25,7 +25,27 @@ if ("$mlip_name" == "" || "$model_name" == "") then
     exit 1
 endif
 
+if (! -e vasp.wrap) then
+    cat > vasp.wrap << 'WRAPEOF'
+[INCAR]
+PREC = high
+ISMEAR = 1
+SIGMA = 0.1
+NSW=41
+IBRION = 2
+ISIF = 3
+KPPRA = 1000
+USEPOT = PAWPBE
+DOSTATIC
+WRAPEOF
+endif
+
 runstruct_vasp -nr
+
+if (! -e POSCAR) then
+    echo "ERROR: runstruct_vasp -nr failed to create POSCAR in `pwd`"
+    exit 1
+endif
 
 if ($is_static == 1) then
     MLIPcalc -mlip=$mlip_name -model=$model_name
