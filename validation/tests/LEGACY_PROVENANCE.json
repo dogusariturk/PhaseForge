@@ -1,0 +1,26 @@
+{
+  "test_uq_bundle.py": {
+    "source": "sublattice_uq_robustness_20261007/test_uq_bundle.py",
+    "sha256": "6092d0971f360b4b523f8b3cab7e567ff12e2e853605f8c2bcb2e2f75f25867b"
+  },
+  "test_cef_fixtures.py": {
+    "source": "sublattice_uq_robustness_20261007/test_cef_fixtures.py",
+    "sha256": "dda78ad6d00d37214064e640afb54ed2ea575089cc3f1c957f701503d79211f2"
+  },
+  "test_noise_marginal.py": {
+    "source": "equilibrium_uq_20261007/test_noise_marginal.py",
+    "sha256": "7d48453aa43aa3e00507aebccc56f8d981ea4cb0f86a982bb6dbbf9791fd6549"
+  },
+  "test_bayes_linear.py": {
+    "source": "bayesian_prototype_20261007/test_bayes_linear.py",
+    "sha256": "f069e0fef6332ecde77db54f4d6561da4ac8ef422896e95301705fcd0730e254"
+  },
+  "test_equilibrium_solver.py": {
+    "source": "equilibrium_uq_20261007/test_equilibrium_solver.py",
+    "portable_changes": [
+      "Removed sibling-directory import; runner provides local prototype path",
+      "Removed standalone benchmark run and benchmark.json write",
+      "Added scope docstring; numerical assertions unchanged"
+    ]
+  }
+}

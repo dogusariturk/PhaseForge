@@ -76,6 +76,14 @@ This command performs:
 
 ## Commands
 
+### Optional Bayesian fitting
+
+An experimental fixed-configuration Bayesian fitter is available through
+`pip install .` and the `phaseforge-uq` command. It exports a mean TDB with
+correlated posterior samples in portable sidecar files. See the
+[UQ guide](docs/bayesian-uq.md) for supported models, examples and tests.
+The existing commands below retain their deterministic behavior.
+
 `sqscal`
 
 ```sh

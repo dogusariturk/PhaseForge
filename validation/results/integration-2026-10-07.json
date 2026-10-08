@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-07",
+  "python": "3.12.14",
+  "dependencies": {
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "sympy": "1.14.0",
+    "pycalphad": "0.11.2"
+  },
+  "public_tests": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0
+  },
+  "reference_tests": {
+    "passed": 71,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tested_installation": "built wheel, installed into an isolated Python 3.12 environment",
+  "backend_hashes": {
+    "phaseforge_uq._linear": "c0af128bc8fa16691fa1b7d1ef30400477c49832b97e74d7048f101fc17bc9fd",
+    "phaseforge_uq.bundle": "a1267c93a58fb74e315c1cb8093bfe8d62bb6ac20cfbb9268bec382fa027b64b"
+  },
+  "calibration_replicates": 1000,
+  "calibration_passed": true,
+  "latent_95_coverage": 941,
+  "predictive_95_coverage": 949,
+  "coverage_acceptance_range": [
+    925,
+    972
+  ],
+  "unchanged_legacy_paths": [
+    "bin",
+    "CMakeLists.txt",
+    "src/ternary_search.cpp",
+    ".gitmodules"
+  ],
+  "scope": "Fixed-configuration linear fitting and bundle export. Nonlinear modules are restricted reference experiments; no actual MLIP/ATAT workflow regression was run."
+}
