@@ -1,0 +1,22 @@
+{
+  "bayes_linear.py": {
+    "source": "bayesian_prototype_20261007/bayes_linear.py",
+    "sha256": "5d6373563a2e16279f581958eaec11f75ac0468ae66b3ec633577864bf45441d"
+  },
+  "equilibrium_solver.py": {
+    "source": "equilibrium_uq_20261007/equilibrium_solver.py",
+    "sha256": "7b5c838ead25442af7db5747e6352f95fe0a697d6b9ca58c7c9b2b5047b949e2"
+  },
+  "noise_marginal.py": {
+    "source": "equilibrium_uq_20261007/noise_marginal.py",
+    "sha256": "4fd4e18c8875e4c22924d29908139e781d8b89ecaa75d18cc1ecb556b27eba42"
+  },
+  "cef_fixtures.py": {
+    "source": "sublattice_uq_robustness_20261007/cef_fixtures.py",
+    "sha256": "b46ed46b464033de9f448ad56fb7f5a8766e062e01e6d6d4fb703fe0b7ee9257"
+  },
+  "uq_bundle.py": {
+    "source": "sublattice_uq_robustness_20261007/uq_bundle.py",
+    "sha256": "5c5501f79a1c0306e3a340891a70cd3f80b8a68e297f8d727c9eac893ad343df"
+  }
+}
