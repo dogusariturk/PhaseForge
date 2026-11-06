@@ -1,0 +1,711 @@
+#!/usr/bin/env python3
+"""MLIPentropy: excess entropy of an alloy liquid (any number of species) from MLIP molecular dynamics.
+
+Reads MD trajectories (any ASE-readable format with positions and velocities, e.g. extxyz or ASE .traj) of one or
+more alloy liquids and of the pure-liquid references of every species at the same temperature, and computes, per mol
+of atoms,
+
+    S_ex = S_vib,ex + S_chem,ex          (J/mol-atom/K; electronic term not computed, reported as missing)
+
+  S_vib,ex   from the mass-weighted velocity autocorrelation (VACF) spectrum of each state, converted with the
+             quantum harmonic entropy per mode, minus the composition-weighted pure-liquid values;
+  S_chem,ex  the pair (quasi-chemical) entropy of the species labels on the neighbour graph, minus ideal mixing:
+                 S_chem / R = -sum_i x_i ln x_i - (zbar/2) sum_ij y_ij ln[ y_ij / (w_i w_j) ]
+             y_ij = fraction of ordered bonds with species i at one end and j at the other (k x k), w_i = sum_j y_ij,
+             zbar = mean coordination (Guggenheim 1944; Kikuchi 1951). The second term is -(zbar/2) times the
+             mutual information of the species at the two ends of a bond: zero for random labels on any graph, so
+             ideal mixing enters exactly once. It is a correction of the chemical-mixing term of Q.-J. Hong and
+             Z.-K. Liu, Phys. Rev. Research 7, L012030 (2025).
+
+Before any excess entropy is reported, the ideal-mixing check permutes the species labels at random on every MD
+neighbour graph of each alloy; the result must give S_chem,ex ~ 0. Uncertainties are block standard errors
+(and, for S_chem,ex, the cutoff sensitivity). The bonds sampled for every species pair are reported. With
+-hongliu, Hong-Liu Eqs. 15-16 are also evaluated on the same graphs of two-species alloys, for comparison only;
+they do not enter S_ex. S_ex is mapped to b_k of L_k = a_k + b_k*T (see docs/protocols/liquid-entropy.md).
+
+Usage:
+  MLIPentropy -temp=[T in K] -dt=[frame interval in fs] -ref=[pure liquid traj] (one per species)
+              -alloy=[alloy traj] [-alloy=...] [-rc=[cutoff in A]] [-cutoff=total|partial] [-tmax=[ps]]
+              [-nblock=5] [-stride=1] [-skip=0] [-order=k] [-hongliu] [-o=entropy.json]
+"""
+import argparse
+import hashlib
+import itertools
+import json
+import sys
+import time
+from math import comb
+from pathlib import Path
+
+import numpy as np
+
+VERSION = "1.0.0"
+R = 8.314462618                      # J/mol/K
+kB_eV = 8.617333262e-5               # eV/K
+h_eV_s = 4.135667696e-15             # eV s
+NA_kB = R
+EV_PER_AMU_A2_FS2 = 103.642697       # 1 amu A^2 / fs^2 in eV
+MIN_PAIR_BONDS = 1000                # warn when a present species pair has fewer sampled bonds
+_trapz = getattr(np, "trapezoid", None) or np.trapz
+
+
+# ====================================================================== entropy of the species labels
+def shannon(p):
+    p = np.asarray(p, float)
+    p = p[p > 0]
+    return float(-(p * np.log(p)).sum())
+
+
+def ideal(x):
+    """Ideal mixing entropy per atom, J/mol/K; x = composition vector, or x_B of a binary."""
+    x = np.atleast_1d(np.asarray(x, float))
+    if x.size == 1:
+        x = np.array([1 - x[0], x[0]])
+    return R * shannon(x)
+
+
+def pair_entropy(xvec, y, zbar):
+    """Pair (quasi-chemical) entropy of the labels, k species. xvec: site fractions; y: ordered bond fractions
+    (k x k, symmetric, sums to 1); zbar: mean coordination. Returns (S_chem, S_ideal, S_chem_excess), J/mol/K."""
+    xvec = np.asarray(xvec, float)
+    y = np.asarray(y, float)
+    w = y.sum(1)
+    m = y > 0
+    mi = float((y[m] * np.log(y[m] / np.outer(w, w)[m])).sum())
+    s_id = R * shannon(xvec)
+    ex = -R * zbar / 2 * mi
+    return s_id + ex, s_id, ex
+
+
+def pair_entropy_x_reference(xvec, y, zbar):
+    """Sensitivity variant: reference x_i x_j instead of bond-end fractions w_i w_j. Identical to pair_entropy on
+    regular graphs; on a liquid it also books the species-coordination coupling as chemical."""
+    xvec = np.asarray(xvec, float)
+    y = np.asarray(y, float)
+    m = y > 0
+    kl = float((y[m] * np.log(y[m] / np.outer(xvec, xvec)[m])).sum())
+    s_id = R * shannon(xvec)
+    return s_id - R * zbar / 2 * kl, s_id, -R * zbar / 2 * kl
+
+
+def pair_entropy_tree(z, xB, alpha):
+    """Entropy per site of the binary quasi-chemical measure (Warren-Cowley alpha) on a Bethe lattice."""
+    xA = 1 - xB
+    yAB = xA * xB * (1 - alpha)
+    y = np.array([[xA - yAB, yAB], [yAB, xB - yAB]])
+    return pair_entropy([xA, xB], y, z)
+
+
+# ====================================================================== Hong-Liu Eqs. 15-16, for comparison
+HONGLIU_READINGS = ("species_blind", "same_species", "cross_species", "heavy_first")
+
+
+def binom_pmf(z, p):
+    return np.array([comb(z, k) * p ** k * (1 - p) ** (z - k) for k in range(z + 1)])
+
+
+def hongliu_eq15(pn, delta):
+    """Hong-Liu Eq. 15, per atom, J/mol/K: S = (1 - delta/2) R sum_n -P_n ln P_n."""
+    return (1 - delta / 2) * R * shannon(pn)
+
+
+def hongliu_from_pmfs(x, pmf_all, pmf_same, pmf_cross, heavy):
+    """Hong-Liu Eqs. 15-16 for two species, for each reading of the pair choice in Eq. 16.
+
+    x: dict species->fraction; pmf_*: dict species->P_n of all / same-species / cross-species neighbours.
+      species_blind : S_conf(X) from P_n of all neighbours, delta = 1
+      same_species  : S_conf(X) from X-X pairs, delta = 1
+      cross_species : S_conf(X) from X-Y pairs, delta = 0
+      heavy_first   : heavier species H from H-H (delta 1), lighter L from L-H (delta 0)
+    """
+    sp = list(x)
+    return {
+        "species_blind": sum(x[s] * hongliu_eq15(pmf_all[s], 1) for s in sp),
+        "same_species": sum(x[s] * hongliu_eq15(pmf_same[s], 1) for s in sp),
+        "cross_species": sum(x[s] * hongliu_eq15(pmf_cross[s], 0) for s in sp),
+        "heavy_first": sum(x[s] * (hongliu_eq15(pmf_same[s], 1) if s == heavy else hongliu_eq15(pmf_cross[s], 0))
+                           for s in sp),
+    }
+
+
+def hongliu_analytic_tree(z, xB, alpha=0.0):
+    """Eqs. 15-16 in the thermodynamic limit, neighbours independent given the centre (B taken as heavy)."""
+    xA = 1 - xB
+    pBA, pAB = xB * (1 - alpha), xA * (1 - alpha)
+    x = {"A": xA, "B": xB}
+    blind = {s: np.eye(z + 1)[z] for s in x}
+    same = {"A": binom_pmf(z, 1 - pBA), "B": binom_pmf(z, 1 - pAB)}
+    cross = {"A": binom_pmf(z, pBA), "B": binom_pmf(z, pAB)}
+    return hongliu_from_pmfs(x, blind, same, cross, heavy="B")
+
+
+# ====================================================================== counting on a neighbour graph
+def _onehot(labels, k):
+    return np.eye(k, dtype=np.int64)[labels]
+
+
+def graph_statistics(labels, nbr, k=None):
+    """labels: (N,) int species 0..k-1; nbr: (N,z) int array or list of neighbour index arrays.
+    Returns (labels, degree, counts) with counts[i, s] = number of species-s neighbours of site i."""
+    labels = np.asarray(labels)
+    k = int(labels.max()) + 1 if k is None else k
+    oh = _onehot(labels, k)
+    if isinstance(nbr, np.ndarray) and nbr.ndim == 2:
+        counts = oh[nbr].sum(1)
+    else:
+        counts = np.array([oh[a].sum(0) for a in nbr])
+    return labels, counts.sum(1), counts
+
+
+def adj_statistics(labels, adj, k=None):
+    """As graph_statistics, from a boolean adjacency matrix."""
+    labels = np.asarray(labels)
+    k = int(labels.max()) + 1 if k is None else k
+    counts = adj.astype(np.int64) @ _onehot(labels, k)
+    return labels, counts.sum(1), counts
+
+
+class Accumulator:
+    """Pools ordered-bond counts (k x k) and neighbour-count histograms over frames, for k species."""
+
+    def __init__(self, k=2, nmax=64):
+        self.k = k
+        self.h_all = np.zeros((k, nmax))      # degree of species-s centres
+        self.h_same = np.zeros((k, nmax))     # same-species neighbours of species-s centres
+        self.h_other = np.zeros((k, nmax))    # other-species neighbours (= cross-species when two are present)
+        self.bonds = np.zeros((k, k))         # ordered bonds: i at the centre end, j at the other end
+        self.sites = np.zeros(k)
+        self.deg_sum = 0.0
+
+    def add(self, labels, deg, counts):
+        n = self.h_all.shape[1]
+        for s in range(self.k):
+            m = labels == s
+            if not m.any():
+                continue
+            same = counts[m, s]
+            self.h_all[s] += np.bincount(deg[m], minlength=n)[:n]
+            self.h_same[s] += np.bincount(same, minlength=n)[:n]
+            self.h_other[s] += np.bincount(deg[m] - same, minlength=n)[:n]
+            self.bonds[s] += counts[m].sum(0)
+            self.sites[s] += m.sum()
+        self.deg_sum += deg.sum()
+
+    def bonds_per_pair(self, names=None):
+        """Undirected bonds sampled for each species pair (summed over the frames)."""
+        names = names or [str(i) for i in range(self.k)]
+        return {f"{names[i]}-{names[j]}": float(self.bonds[i, j] if i != j else self.bonds[i, i] / 2)
+                for i in range(self.k) for j in range(i, self.k)}
+
+    def result(self, heavy=None):
+        x = self.sites / self.sites.sum()
+        y = self.bonds / self.bonds.sum()
+        y = 0.5 * (y + y.T)  # exact for an undirected graph; guards against rounding
+        zbar = self.deg_sum / self.sites.sum()
+        sc, si, se = pair_entropy(x, y, zbar)
+        sa, _, sea = pair_entropy_x_reference(x, y, zbar)
+        return {"x": x.tolist(), "zbar": float(zbar), "y": y.tolist(), "ideal": si, "pair": sc, "pair_excess": se,
+                "pair_xref": sa, "pair_xref_excess": sea, "hongliu": self._hongliu(x, heavy),
+                "hongliu_species_blind_all": R * 0.5 * shannon(self.h_all.sum(0) / self.h_all.sum()),
+                "bond_counts_ordered": self.bonds.tolist(),
+                "n_sites": float(self.sites.sum()), "n_bonds_ordered": float(self.bonds.sum())}
+
+    def _hongliu(self, x, heavy):
+        pres = [s for s in range(self.k) if x[s] > 0]
+        if len(pres) != 2:
+            return None
+
+        def nz(h):
+            return h / h.sum() if h.sum() > 0 else h
+
+        hv = heavy if heavy in pres else pres[1]
+        return hongliu_from_pmfs({s: x[s] for s in pres}, {s: nz(self.h_all[s]) for s in pres},
+                                 {s: nz(self.h_same[s]) for s in pres}, {s: nz(self.h_other[s]) for s in pres}, heavy=hv)
+
+
+def lattice(kind, L):
+    """(n_sites, (N,z) neighbour array), periodic: chain (z=2), square (z=4), bcc (z=8), fcc (z=12)."""
+    if kind == "chain":
+        i = np.arange(L)
+        return L, np.stack([(i - 1) % L, (i + 1) % L], 1)
+    if kind == "square":
+        idx = np.arange(L * L).reshape(L, L)
+        offs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        return L * L, np.stack([np.roll(idx, (-a, -b), (0, 1)).ravel() for a, b in offs], 1)
+    M = 2 * L
+    g = np.indices((M, M, M)).reshape(3, -1).T
+    if kind == "bcc":
+        pts = g[(g % 2 == g[:, :1] % 2).all(1)]
+        offs = np.array([(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)])
+    elif kind == "fcc":
+        pts = g[g.sum(1) % 2 == 0]
+        offs = np.array(sorted({(a, b, 0) for a in (-1, 1) for b in (-1, 1)} | {(a, 0, b) for a in (-1, 1) for b in (-1, 1)}
+                               | {(0, a, b) for a in (-1, 1) for b in (-1, 1)}))
+    else:
+        raise ValueError(kind)
+    index = -np.ones((M, M, M), int)
+    index[tuple(pts.T)] = np.arange(len(pts))
+    nb = np.stack([index[tuple(((pts + o) % M).T)] for o in offs], 1)
+    assert (nb >= 0).all()
+    return len(pts), nb
+
+
+# ====================================================================== liquid neighbour graphs and RDF
+def distances(pos, L):
+    """Minimum-image distance matrix in an orthorhombic box with edges L (3,)."""
+    d = pos[:, None, :] - pos[None, :, :]
+    d -= L * np.round(d / L)
+    return np.sqrt((d * d).sum(-1))
+
+
+def liquid_neighbours(pos, L, labels, rc):
+    """Adjacency matrix: pairs closer than rc[label_i, label_j] (k x k cutoff matrix, A)."""
+    r = distances(pos, L)
+    np.fill_diagonal(r, np.inf)
+    return r < rc[labels[:, None], labels[None, :]]
+
+
+def rdf(pos, L, lab, k, stride=10, dr=0.025):
+    """Partial RDFs g_ij (i <= j) and the species-blind total RDF over frames pos[::stride]."""
+    N = len(lab)
+    edges = np.arange(0, L.min() / 2 + dr, dr)
+    H = np.zeros((k, k, len(edges) - 1))
+    Ht = np.zeros(len(edges) - 1)
+    iu = np.triu_indices(N, 1)
+    a, b = np.minimum(lab[iu[0]], lab[iu[1]]), np.maximum(lab[iu[0]], lab[iu[1]])
+    nf = 0
+    for f in range(0, pos.shape[0], stride):
+        r = distances(np.asarray(pos[f], float), L)[iu]
+        Ht += np.histogram(r, edges)[0]
+        for i in range(k):
+            for j in range(i, k):
+                m = (a == i) & (b == j)
+                if m.any():
+                    H[i, j] += np.histogram(r[m], edges)[0]
+        nf += 1
+    rc = 0.5 * (edges[1:] + edges[:-1])
+    shell = 4 * np.pi * rc ** 2 * dr
+    V = float(np.prod(L))
+    Nsp = np.bincount(lab, minlength=k)
+    g = {}
+    for i in range(k):
+        for j in range(i, k):
+            npairs = Nsp[i] * (Nsp[j] - (i == j)) / (2 if i == j else 1)
+            if npairs:
+                g[(i, j)] = H[i, j] / nf / (npairs * shell / V)
+    gt = Ht / nf / (N * (N - 1) / 2 * shell / V)
+    return rc, g, gt
+
+
+def first_min(r, g):
+    """First minimum after the first peak (5-bin smoothed, searched within 2 A of the peak)."""
+    gs = np.convolve(g, np.ones(5) / 5, mode="same")
+    ip = int(np.argmax(gs))
+    idx = np.where((r > r[ip]) & (r < r[ip] + 2.0))[0]
+    return float(r[idx[np.argmin(gs[idx])]]), float(r[ip])
+
+
+def cutoffs(pos, L, lab, k, stride, names):
+    r, g, gt = rdf(pos, L, lab, k, stride=stride)
+    rcm = np.full((k, k), np.nan)
+    peaks = {}
+    for (i, j), gij in g.items():
+        m, p = first_min(r, gij)
+        rcm[i, j] = rcm[j, i] = m
+        peaks[f"{names[i]}-{names[j]}"] = {"first_peak_A": p, "first_min_A": m}
+    mt, pt = first_min(r, gt)
+    rcm = np.where(np.isnan(rcm), mt, rcm)  # pairs absent from this state: total-RDF minimum (never used)
+    return {"rc_total_A": mt, "total_first_peak_A": pt, "rc_partial_A": rcm.tolist(), "partials": peaks}
+
+
+def chem_state(pos, L, lab, rcm, k, stride=1, nblock=5, shuffle=None):
+    nf = pos.shape[0]
+    blocks = [Accumulator(k) for _ in range(nblock)]
+    tot = Accumulator(k)
+    for f in range(0, nf, stride):
+        lb = lab if shuffle is None else shuffle.permutation(lab)
+        st = adj_statistics(lb, liquid_neighbours(np.asarray(pos[f], float), L, lb, rcm), k)
+        tot.add(*st)
+        blocks[min(nblock - 1, f * nblock // nf)].add(*st)
+    return tot, blocks
+
+
+def block_se(vals):
+    vals = np.asarray(vals, float)
+    return float(np.std(vals, ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else float("nan")
+
+
+# ====================================================================== vibrational entropy (VACF spectrum)
+def dos_from_velocities(vel, masses, dt_fs, T, tmax_ps):
+    """Mass-weighted VACF -> vibrational DOS g(nu) (integral 3N over nu in THz). vel in ASE units."""
+    from ase import units
+    nf, N, _ = vel.shape
+    v = vel.astype(np.float64) * units.fs
+    nfft = 1 << int(np.ceil(np.log2(2 * nf)))
+    C_ = np.zeros(nf)
+    for j in range(N):
+        for k in range(3):
+            f = np.fft.rfft(v[:, j, k], n=nfft)
+            ac = np.fft.irfft(f * np.conj(f), n=nfft)[:nf]
+            ac /= (nf - np.arange(nf))
+            C_ += masses[j] * ac
+    t_fs = np.arange(nf) * dt_fs
+    tmax = min(nf - 1, int(tmax_ps * 1000 / dt_fs))
+    Cw = C_[:tmax + 1].copy()
+    Cw *= 0.5 * (1 + np.cos(np.pi * np.arange(tmax + 1) / tmax))
+    kT = kB_eV * T / EV_PER_AMU_A2_FS2
+    nu_THz = np.linspace(0, 1.0 / (2 * dt_fs) * 1000, 40001)
+    tt = t_fs[:tmax + 1]
+    g = np.empty_like(nu_THz)
+    for a in range(0, len(nu_THz), 2000):
+        nu = nu_THz[a:a + 2000]
+        g[a:a + 2000] = 2.0 / kT * 2.0 * _trapz(Cw[None] * np.cos(2 * np.pi * nu[:, None] * 1e-3 * tt[None]), tt, axis=1)
+    return nu_THz, g * 1e-3, C_, t_fs
+
+
+def s_vib(nu_THz, g, T):
+    """Quantum harmonic entropy of the DOS, J/mol/K per cell (divide by N for per atom)."""
+    x = h_eV_s * nu_THz * 1e12 / (2 * kB_eV * T)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        W = np.where(x > 1e-12, x / np.tanh(x) - np.log(2 * np.sinh(x)), 0.0)
+    return NA_kB * _trapz(g * W, nu_THz)
+
+
+def vib_state(vel, masses, dt_fs, T, tmax_ps, nblock):
+    N = vel.shape[1]
+    nu, g, _, _ = dos_from_velocities(vel, masses, dt_fs, T, tmax_ps)
+    full = s_vib(nu, g, T) / N
+    nf = vel.shape[0]
+    bl = []
+    for b in range(nblock):
+        sl = slice(b * nf // nblock, (b + 1) * nf // nblock)
+        nu_b, g_b, _, _ = dos_from_velocities(vel[sl], masses, dt_fs, T, tmax_ps)
+        bl.append(s_vib(nu_b, g_b, T) / N)
+    dnu = nu[1] - nu[0]
+    return {"S_vib": float(full), "S_vib_blocks": [float(b) for b in bl], "S_vib_block_SE": block_se(bl),
+            "dos_integral_per_atom": float(_trapz(g, nu) / N),
+            "negative_dos_weight_per_atom": float(-g[g < 0].sum() * dnu / N)}
+
+
+# ====================================================================== CALPHAD mapping
+def rk_design(X, order):
+    """Columns -x_i x_j (x_i - x_j)^k for every pair i < j and k = 0..order (Redlich-Kister, no ternary terms)."""
+    X = np.asarray(X, float)
+    cols, names = [], []
+    for i, j in itertools.combinations(range(X.shape[1]), 2):
+        for k in range(order + 1):
+            cols.append(-X[:, i] * X[:, j] * (X[:, i] - X[:, j]) ** k)
+            names.append((i, j, k))
+    return np.stack(cols, 1), names
+
+
+def map_to_bk(X, sex, cov, order):
+    """Generalised least squares for S_ex = -sum_{i<j} x_i x_j sum_k b_k^{ij} (x_i - x_j)^k. Binary: x = x_B,
+    S_ex = -x(1-x) sum_k b_k (1-2x)^k."""
+    A, names = rk_design(X, order)
+    Ci = np.linalg.inv(cov)
+    covb = np.linalg.inv(A.T @ Ci @ A)
+    b = covb @ A.T @ Ci @ np.asarray(sex, float)
+    res = np.asarray(sex) - A @ b
+    return {"order": order, "b": b.tolist(), "cov_b": covb.tolist(), "b_SE": np.sqrt(np.diag(covb)).tolist(),
+            "columns": names, "chi2": float(res @ Ci @ res), "dof": int(len(sex) - len(b))}
+
+
+# ====================================================================== input
+def sha256(p):
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for blk in iter(lambda: f.read(1 << 23), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def read_traj(path, skip=0):
+    """Positions (nf,N,3) A, velocities (nf,N,3) ASE units, masses, symbols, orthorhombic box edges (3,)."""
+    from ase.io import iread
+    pos, vel = [], []
+    sym = cell = masses = None
+    for i, at in enumerate(iread(str(path), index=":")):
+        if i < skip:
+            continue
+        if sym is None:
+            sym, cell, masses = at.get_chemical_symbols(), at.cell.array.copy(), at.get_masses()
+        elif at.get_chemical_symbols() != sym:
+            raise SystemExit(f"{path}: species order changes between frames")
+        elif not np.allclose(at.cell.array, cell, atol=1e-6):
+            raise SystemExit(f"{path}: cell changes between frames (NVT production expected)")
+        v = at.get_velocities()
+        if v is None or not np.any(v):
+            raise SystemExit(f"{path}: frame {i} has no velocities")
+        pos.append(at.positions.copy())
+        vel.append(v.copy())
+    if not pos:
+        raise SystemExit(f"{path}: no frames")
+    if not np.allclose(cell, np.diag(np.diag(cell)), atol=1e-8):
+        raise SystemExit(f"{path}: only orthorhombic cells are supported")
+    return np.array(pos), np.array(vel), np.asarray(masses), sym, np.diag(cell).copy()
+
+
+def kinetic_T(vel, masses):
+    from ase import units
+    ke = 0.5 * (masses[None, :, None] * vel ** 2).sum((1, 2))  # eV
+    return float(ke.mean() * 2 / (3 * vel.shape[1] * units.kB))
+
+
+# ====================================================================== main
+def parse(argv):
+    p = argparse.ArgumentParser(prog="MLIPentropy", description=__doc__.split("\n\n")[0],
+                                formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("Usage:")[1])
+    p.add_argument("-temp", type=float, required=True, help="temperature of every state, K")
+    p.add_argument("-dt", type=float, required=True, help="time between saved frames, fs")
+    p.add_argument("-ref", action="append", required=True, help="pure-liquid reference trajectory (one per species)")
+    p.add_argument("-alloy", action="append", required=True, help="alloy-liquid trajectory (repeat for several x)")
+    p.add_argument("-cutoff", choices=("total", "partial"), default="total",
+                   help="neighbour cutoff: first minimum of the total RDF (default) or of each partial RDF")
+    p.add_argument("-rc", type=float, default=None, help="fixed neighbour cutoff, A (overrides -cutoff)")
+    p.add_argument("-rc_delta", type=float, default=0.1, help="cutoff shift for the sensitivity cases, A")
+    p.add_argument("-tmax", type=float, default=3.0, help="VACF window, ps")
+    p.add_argument("-nblock", type=int, default=5, help="blocks for the standard errors")
+    p.add_argument("-stride", type=int, default=1, help="frame stride for the neighbour graphs")
+    p.add_argument("-rdf_stride", type=int, default=10, help="frame stride for the RDFs")
+    p.add_argument("-skip", type=int, default=0, help="leading frames to discard")
+    p.add_argument("-ideal_tol", type=float, default=0.05, help="ideal-mixing check tolerance, J/mol-atom/K")
+    p.add_argument("-seed", type=int, default=20261105, help="seed of the label permutations")
+    p.add_argument("-order", type=int, default=None, help="highest k in L_k = a_k + b_k T (default: largest the data determine, at most 2)")
+    p.add_argument("-hongliu", action="store_true", help="also report Hong-Liu Eqs. 15-16, for comparison")
+    p.add_argument("-o", default="entropy.json", help="output JSON")
+    return p.parse_args(argv)
+
+
+def analyse_chem(pos, L, lab, k, cut, a, heavy):
+    """Pair-corrected chemical term with cutoff-sensitivity cases and block SE."""
+    if a.rc is not None:
+        base = np.full((k, k), a.rc)
+        variants = {"fixed_rc": base, "fixed_rc_minus_delta": base - a.rc_delta, "fixed_rc_plus_delta": base + a.rc_delta}
+    else:
+        tot = np.full((k, k), cut["rc_total_A"])
+        par = np.array(cut["rc_partial_A"])
+        base = tot if a.cutoff == "total" else par
+        name = f"{a.cutoff}_rdf_minimum"
+        other = ("partial" if a.cutoff == "total" else "total") + "_rdf_minimum"
+        variants = {name: base, name + "_minus_delta": base - a.rc_delta, name + "_plus_delta": base + a.rc_delta,
+                    other: par if a.cutoff == "total" else tot}
+    rows = {}
+    for vname, rcm in variants.items():
+        acc, blocks = chem_state(pos, L, lab, rcm, k, a.stride, a.nblock)
+        r = acc.result(heavy=heavy)
+        r["S_chem_excess_block_SE"] = block_se([b.result(heavy=heavy)["pair_excess"] for b in blocks])
+        r["rc_A"] = rcm.tolist()
+        r["acc"] = acc
+        rows[vname] = r
+    b0 = next(iter(rows))
+    spread = max(abs(rows[v]["pair_excess"] - rows[b0]["pair_excess"]) for v in rows)
+    return b0, rows, spread
+
+
+def main(argv=None):
+    a = parse(sys.argv[1:] if argv is None else argv)
+    t0 = time.time()
+    T = a.temp
+    states = {}
+    for role, paths in (("ref", a.ref), ("alloy", a.alloy)):
+        for pth in paths:
+            pos, vel, m, sym, L = read_traj(pth, a.skip)
+            states[pth] = {"role": role, "pos": pos, "vel": vel, "masses": m, "sym": np.array(sym), "L": L}
+    ref = {}
+    for pth in a.ref:
+        u = np.unique(states[pth]["sym"])
+        if len(u) != 1:
+            raise SystemExit(f"{pth}: a reference must be a pure liquid, found {list(u)}")
+        if str(u[0]) in ref:
+            raise SystemExit(f"two references for {u[0]}")
+        ref[str(u[0])] = pth
+    names = sorted(ref)                       # alphabetical species order; binary: x = x_B, (x_A - x_B)^k
+    k = len(names)
+    if k < 2:
+        raise SystemExit("give one -ref pure-liquid trajectory per species (at least two)")
+    idx = {el: i for i, el in enumerate(names)}
+    mass = {}
+    for pth, s in states.items():
+        bad = set(s["sym"]) - set(names)
+        if bad:
+            raise SystemExit(f"{pth}: species {sorted(bad)} have no pure-liquid reference")
+        s["lab"] = np.array([idx[e] for e in s["sym"]], int)
+        for el, mm in zip(s["sym"], s["masses"]):
+            mass.setdefault(str(el), float(mm))
+    heavy = int(np.argmax([mass[el] for el in names]))
+    warn = []
+
+    def pair_matrix(M):
+        return {f"{names[i]}-{names[j]}": float(M[i][j]) for i in range(k) for j in range(i, k)}
+
+    # ---------------------------------------------------------------- neighbour cutoffs, kinetic temperature
+    for pth, s in states.items():
+        s["cut"] = cutoffs(s["pos"], s["L"], s["lab"], k, a.rdf_stride, names)
+        s["cut"]["rc_partial_A"] = pair_matrix(s["cut"]["rc_partial_A"])
+        s["T_kin"] = kinetic_T(s["vel"], s["masses"])
+        if abs(s["T_kin"] - T) / T > 0.05:
+            warn.append(f"{pth}: mean kinetic temperature {s['T_kin']:.1f} K differs from -temp={T:g} K by > 5 %")
+
+    def rc_matrix(cut):
+        M = np.empty((k, k))
+        for i in range(k):
+            for j in range(i, k):
+                M[i, j] = M[j, i] = cut["rc_partial_A"][f"{names[i]}-{names[j]}"]
+        return M
+
+    # ---------------------------------------------------------------- ideal-mixing check (first)
+    rng = np.random.default_rng(a.seed)
+    check = {}
+    for pth in a.alloy:
+        s = states[pth]
+        rc1 = a.rc if a.rc is not None else s["cut"]["rc_total_A"]
+        acc, blocks = chem_state(s["pos"], s["L"], s["lab"], np.full((k, k), rc1), k, a.stride, a.nblock, shuffle=rng)
+        r = acc.result(heavy=heavy)
+        check[pth] = {"x": dict(zip(names, r["x"])), "rc_A": rc1, "S_ideal": r["ideal"], "S_chem_pair_permuted": r["pair"],
+                      "S_chem_excess_permuted": r["pair_excess"],
+                      "block_SE": block_se([b.result(heavy=heavy)["pair_excess"] for b in blocks]),
+                      "bonds_per_pair": acc.bonds_per_pair(names), "passed": bool(abs(r["pair_excess"]) < a.ideal_tol)}
+    ideal_ok = all(c["passed"] for c in check.values())
+    if not ideal_ok:
+        warn.append("ideal-mixing check FAILED: random labels on the MD neighbour graph do not give S_chem,ex ~ 0; "
+                    "excess entropies are held")
+
+    # ---------------------------------------------------------------- vibrational
+    for pth, s in states.items():
+        nf = s["vel"].shape[0]
+        if nf // a.nblock - 1 < a.tmax * 1000 / a.dt:
+            warn.append(f"{pth}: block length {nf // a.nblock * a.dt / 1000:g} ps is shorter than the VACF window "
+                        f"{a.tmax:g} ps; block SEs use a truncated window")
+        s["vib"] = vib_state(s["vel"], s["masses"], a.dt, T, a.tmax, a.nblock)
+    rv = {el: states[ref[el]]["vib"] for el in names}
+
+    # ---------------------------------------------------------------- per alloy
+    pure_blind = {}
+    if a.hongliu:
+        for el in names:
+            s = states[ref[el]]
+            rcm = np.full((k, k), a.rc if a.rc is not None else s["cut"]["rc_total_A"])
+            acc, _ = chem_state(s["pos"], s["L"], s["lab"], rcm, k, a.stride, a.nblock)
+            pure_blind[el] = acc.result()["hongliu_species_blind_all"]
+    out_alloys = {}
+    for pth in a.alloy:
+        s = states[pth]
+        x = np.bincount(s["lab"], minlength=k) / len(s["lab"])
+        v = s["vib"]
+        vex = v["S_vib"] - sum(x[i] * rv[el]["S_vib"] for i, el in enumerate(names))
+        vse = float(np.sqrt(v["S_vib_block_SE"] ** 2 + sum((x[i] * rv[el]["S_vib_block_SE"]) ** 2 for i, el in enumerate(names))))
+        cut = dict(s["cut"], rc_partial_A=rc_matrix(s["cut"]))
+        b0, rows, spread = analyse_chem(s["pos"], s["L"], s["lab"], k, cut, a, heavy)
+        base = rows[b0]
+        ch, cse = base["pair_excess"], base["S_chem_excess_block_SE"]
+        uch = float(np.hypot(cse, spread))
+        bpp = base["acc"].bonds_per_pair(names)
+        nbonds = sum(bpp.values())
+        for i, j in itertools.combinations_with_replacement(range(k), 2):
+            pair = f"{names[i]}-{names[j]}"
+            expect = nbonds * x[i] * x[j] * (1 if i == j else 2)   # bonds of this pair under random mixing
+            if 0 < expect < MIN_PAIR_BONDS:
+                warn.append(f"{pth}: {pair} would have only {expect:.0f} sampled bonds under random mixing "
+                            f"(< {MIN_PAIR_BONDS}; observed {bpp[pair]:.0f}); the pair term is poorly sampled")
+        row = {"x": dict(zip(names, x.tolist())), "N": int(len(s["lab"])), "frames": int(s["pos"].shape[0]),
+               "S_vib": v["S_vib"], "S_vib_block_SE": v["S_vib_block_SE"],
+               "S_vib_excess": float(vex), "S_vib_excess_SE": vse,
+               "S_ideal": base["ideal"], "S_chem_pair": base["pair"], "S_chem_excess": ch,
+               "S_chem_excess_block_SE": cse, "S_chem_excess_cutoff_spread": float(spread), "S_chem_excess_u": uch,
+               "S_excess": float(vex + ch), "S_excess_u": float(np.hypot(vse, uch)),
+               "S_electronic_excess": None, "zbar": base["zbar"],
+               "species_order": names, "y_bonds": base["y"], "bond_counts_ordered": base["bond_counts_ordered"],
+               "bonds_per_pair": bpp, "frames_in_graph": len(range(0, s["pos"].shape[0], a.stride)),
+               "cutoff_case": b0,
+               "cutoff_cases": {nm: {"rc_A": r["rc_A"], "S_chem_excess": r["pair_excess"],
+                                     "S_chem_excess_block_SE": r["S_chem_excess_block_SE"], "zbar": r["zbar"]}
+                                for nm, r in rows.items()},
+               "S_chem_excess_x_reference_variant": base["pair_xref_excess"],
+               "neighbour_cutoffs": s["cut"], "T_kinetic_K": s["T_kin"],
+               "dos_integral_per_atom": v["dos_integral_per_atom"],
+               "negative_dos_weight_per_atom": v["negative_dos_weight_per_atom"],
+               "status": "computed" if ideal_ok else "held (ideal-mixing check failed)"}
+        if a.hongliu:
+            hl = base["hongliu"]
+            if hl is None:
+                row["hongliu_eqs_15_16_for_comparison"] = {"note": "evaluated for alloys with two species only"}
+            else:
+                pres = [i for i in range(k) if x[i] > 0]
+                pb = sum(x[i] * pure_blind[names[i]] for i in pres)
+                row["hongliu_eqs_15_16_for_comparison"] = {
+                    "note": "Hong-Liu Eqs. 15-16 on the same neighbour graphs, for comparison only; not used in S_excess",
+                    "S_conf": hl, "pure_species_blind": {names[i]: pure_blind[names[i]] for i in pres},
+                    "S_conf_minus_pure_references": {r_: val - pb for r_, val in hl.items()}}
+        out_alloys[pth] = row
+
+    # ---------------------------------------------------------------- CALPHAD mapping with shared-reference covariance
+    keys = list(out_alloys)
+    X = np.array([[out_alloys[kk]["x"][el] for el in names] for kk in keys])
+    sex = np.array([out_alloys[kk]["S_excess"] for kk in keys])
+    cov = np.diag([out_alloys[kk]["S_vib_block_SE"] ** 2 + out_alloys[kk]["S_chem_excess_u"] ** 2 for kk in keys])
+    for i, el in enumerate(names):
+        cov += np.outer(X[:, i], X[:, i]) * rv[el]["S_vib_block_SE"] ** 2
+    npairs = k * (k - 1) // 2
+    n = len(keys)
+    order = a.order if a.order is not None else min(2, n // npairs - 1)
+    calphad = {"model": "L_k^{ij}(T) = a_k + b_k*T; S_ex = -sum_{i<j} x_i x_j sum_k b_k^{ij} (x_i - x_j)^k "
+                        "(binary, x = x_B: S_ex = -x(1-x) sum_k b_k (1-2x)^k)",
+               "species_order": names, "compositions": X.tolist(), "S_excess": sex.tolist(), "cov_S_excess": cov.tolist(),
+               "use": "soft likelihood constraint with the stated covariance; not hard parameter bounds"}
+    if order < 0 or npairs * (order + 1) > n:
+        calphad["fit"] = None
+        calphad["note"] = (f"not determined: {n} composition(s) for {npairs} species pair(s); "
+                           "use S_excess and its covariance directly in the fit")
+        if a.order is not None and order >= 0:
+            warn.append(f"-order={order} needs at least {npairs * (order + 1)} alloy compositions; mapping skipped")
+    else:
+        fit = map_to_bk(X, sex, cov, order)
+        fit["columns"] = [f"b_{kk}^{names[i]},{names[j]}" for i, j, kk in fit["columns"]]
+        calphad["fit"] = fit
+        calphad["note"] = ("a single binary composition constrains only sum_k b_k (1-2x)^k (b_0 at x = 0.5); "
+                           "no ternary interaction terms are fitted")
+
+    out = {"tool": "MLIPentropy", "version": VERSION, "units": "J/mol-atom/K", "T_K": T,
+           "species_order": names,
+           "ideal_mixing_check": {"criterion": f"|S_chem,ex(random labels)| < {a.ideal_tol} J/mol-atom/K",
+                                  "passed": ideal_ok, "alloys": check},
+           "references": {el: {"file": ref[el], "S_vib": rv[el]["S_vib"], "S_vib_block_SE": rv[el]["S_vib_block_SE"],
+                               "S_vib_blocks": rv[el]["S_vib_blocks"], "T_kinetic_K": states[ref[el]]["T_kin"],
+                               "N": int(len(states[ref[el]]["lab"])), "frames": int(states[ref[el]]["pos"].shape[0]),
+                               "dos_integral_per_atom": rv[el]["dos_integral_per_atom"],
+                               "neighbour_cutoffs": states[ref[el]]["cut"]} for el in names},
+           "alloys": out_alloys, "calphad_mapping": calphad,
+           "missing_terms": {"electronic": "not computed (unknown, not zero)"},
+           "uncertainty": "S_chem,ex u = quadrature(block SE, max |cutoff case - base|); S_vib,ex SE = quadrature of "
+                          "block SEs of the alloy and x-weighted references; covariance from shared references; "
+                          "potential and method error not included",
+           "settings": {kk: getattr(a, kk) for kk in ("temp", "dt", "cutoff", "rc", "rc_delta", "tmax", "nblock", "stride",
+                                                      "rdf_stride", "skip", "ideal_tol", "seed", "order", "hongliu")},
+           "inputs_sha256": {pth: sha256(pth) for pth in states},
+           "tool_sha256": sha256(__file__) if Path(__file__).is_file() else None,
+           "warnings": warn, "created_unix": time.time(), "elapsed_s": time.time() - t0,
+           "citation": "Pair (quasi-chemical) chemical term: a correction of the chemical-mixing term of Q.-J. Hong and "
+                       "Z.-K. Liu, Phys. Rev. Research 7, L012030 (2025), https://doi.org/10.1103/PhysRevResearch.7.L012030"}
+    Path(a.o).write_text(json.dumps(out, indent=1))
+    for w in warn:
+        print("WARNING:", w, file=sys.stderr)
+    print(f"Ideal-mixing check: {'passed' if ideal_ok else 'FAILED'} ("
+          + ", ".join(f"{c['S_chem_excess_permuted']:+.4f}" for c in check.values()) + " J/mol-atom/K)")
+    for kk in keys:
+        r = out_alloys[kk]
+        comp = " ".join(f"{el}{r['x'][el]:.3f}" for el in names if r["x"][el] > 0)
+        print(f"{comp}  S_vib,ex={r['S_vib_excess']:+.3f}({r['S_vib_excess_SE']:.3f})  "
+              f"S_chem,ex={r['S_chem_excess']:+.3f}({r['S_chem_excess_u']:.3f})  "
+              f"S_ex={r['S_excess']:+.3f}({r['S_excess_u']:.3f}) J/mol-atom/K  [{r['status']}]")
+    if calphad["fit"]:
+        f = calphad["fit"]
+        print("b:", ", ".join(f"{c}={b:+.3f}({e:.3f})" for c, b, e in zip(f["columns"], f["b"], f["b_SE"])), "J/mol-atom/K")
+    else:
+        print("b:", calphad["note"])
+    print(f"Written to {a.o}")
+    return out
+
+
+if __name__ == "__main__":
+    main()
