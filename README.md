@@ -74,6 +74,12 @@ This command performs:
 ---
 
 
+## Liquid entropy protocol
+
+For liquid model construction and refinement, follow the [standard liquid entropy protocol](docs/protocols/liquid-entropy.md). It requires component-resolved entropy calculations, matched pure-liquid references, finite-size acceptance, chemical-mixing validation and uncertainty propagation before entropy evidence enters fitting. The `MLIPentropy` command implements the entropy estimator.
+
+---
+
 ## Commands
 
 `sqscal`
@@ -148,6 +154,14 @@ ternary_search -ll=[lower limit] -ul=[upper limit] -eps=[epsilon] -c=[command fo
 ```
 
 Perform ternary search for the volume. Stop when upper limit - lower limit < epsilon. 
+
+`MLIPentropy`
+
+```sh
+MLIPentropy -temp=[temperature] -dt=[frame interval, fs] -ref=[pure liquid] [-ref=...] -alloy=[alloy liquid] [-alloy=...] [-rc=[cutoff]] [-hongliu] [-o=entropy.json]
+```
+
+Excess entropy of an alloy liquid (any number of species) from MD trajectories (ASE-readable, with velocities) of the alloy and of the pure liquids at the same temperature: vibrational term from the VACF spectrum, chemical term from the pair (quasi-chemical) entropy of the species labels on the neighbour graph, a random-label ideal-mixing check, block uncertainties, and the mapping to b_k of L_k = a_k + b_k T. If -hongliu, Hong–Liu Eqs. 15–16 are also reported, for comparison. See [liquid-entropy.md](docs/protocols/liquid-entropy.md#estimator-mlipentropy). Tests: `python -m pytest tests`.
 
 `robustrelax_MLIP`
 
